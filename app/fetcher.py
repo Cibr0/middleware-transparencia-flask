@@ -14,5 +14,7 @@ def fetch_produtos(simular_erro=False):
         produtos[10]["price"] = -100
         produtos[1].pop("title", None)
         produtos[2]["price"] = "caro"
+        produtos[4]["meta"]["createdAt"] = "data_errada"
+        produtos[1].pop("description", None)
 
     return produtos

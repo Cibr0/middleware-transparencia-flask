@@ -1,9 +1,12 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from datetime import datetime
+
+class Meta(BaseModel):
+    createdAt: datetime
+    updatedAt: datetime
 
 class Produto(BaseModel):
     id: int
     title: str
-    description: str
     price: float = Field(ge=0)
-    category: Optional[str] = None
+    meta: Meta

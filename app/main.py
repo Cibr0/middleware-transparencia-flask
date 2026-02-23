@@ -15,7 +15,8 @@ def produtos_summary():
 
     integridade = {
         "erros_por_campo": {},
-        "tipos_de_erro": {},
+        "lista_erros_detectados": set(),
+        "source_url": "https://dummyjson.com/products",
         "acoes_tomadas": {
             "aceitos": 0,
             "descartados": 0
@@ -35,18 +36,26 @@ def produtos_summary():
             for erro in e.errors():
                 campo = erro["loc"][0]
                 tipo = erro["type"]
+                valor = item.get(campo, "ausente")
 
-                integridade["erros_por_campo"][campo] = (
-                    integridade["erros_por_campo"].get(campo, 0) + 1
-                )
+                if campo not in integridade["erros_por_campo"]:
+                    integridade["erros_por_campo"][campo] = {
+                        "quantidade": 0,
+                        "exemplos": []
+                    }
 
-                integridade["tipos_de_erro"][tipo] = (
-                    integridade["tipos_de_erro"].get(tipo, 0) + 1
-                )
+                integridade["erros_por_campo"][campo]["quantidade"] += 1
+                integridade["erros_por_campo"][campo]["exemplos"].append(str(valor))
+
+                integridade["lista_erros_detectados"].add(tipo)
+
+    integridade["lista_erros_detectados"] = list(integridade["lista_erros_detectados"])
 
     return jsonify({
-        "total_produtos": len(produtos),
-        "integridade": integridade
+        "total_registros": len(produtos),
+        "validos": integridade["acoes_tomadas"]["aceitos"],
+        "invalidos": integridade["acoes_tomadas"]["descartados"],
+        "integridade_report": integridade
     })
 
 if __name__ == "__main__":
