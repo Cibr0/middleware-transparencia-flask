@@ -2,12 +2,20 @@ from flask import Flask, jsonify
 from fetcher import fetch_produtos
 from models import Produto
 from pydantic import ValidationError
+import time
 
 app = Flask(__name__)
 
+start_time = time.time()
+
 @app.route("/status")
 def status():
-    return jsonify({"status": "ok"})
+    uptime = time.time() - start_time
+    return jsonify({
+        "status": "ok",
+        "uptime": uptime,
+        "version": "1.0"
+    })
 
 @app.route("/data/summary")
 def produtos_summary():
@@ -51,12 +59,17 @@ def produtos_summary():
 
     integridade["lista_erros_detectados"] = list(integridade["lista_erros_detectados"])
 
+    #JSON padronizado com o campo meta.integrity_report
     return jsonify({
+    "data": {
         "total_registros": len(produtos),
         "validos": integridade["acoes_tomadas"]["aceitos"],
-        "invalidos": integridade["acoes_tomadas"]["descartados"],
-        "integridade_report": integridade
-    })
+        "invalidos": integridade["acoes_tomadas"]["descartados"]
+    },
+    "meta": {
+        "integrity_report": integridade
+    }
+})
 
 if __name__ == "__main__":
     app.run(debug=True)
