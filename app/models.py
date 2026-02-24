@@ -9,4 +9,5 @@ class Produto(BaseModel):
     id: int
     title: str
     price: float = Field(ge=0)
+    category: str
     meta: Meta

@@ -1,3 +1,6 @@
+from collections import Counter
+from statistics import mean, median
+
 from flask import Flask, jsonify
 from fetcher import fetch_produtos
 from models import Produto
@@ -58,15 +61,33 @@ def produtos_summary():
                 integridade["erros_por_campo"][campo]["exemplos"].append(str(valor))
 
                 integridade["lista_erros_detectados"].add(tipo)
-
+    
     integridade["lista_erros_detectados"] = list(integridade["lista_erros_detectados"])
+
+    # Cálculo de média e mediana dos preços dos produtos válidos
+    #Media - Soma tudo e divide pela quantidade.
+    #Mediana - Ordena e pega o valor do meio.
+    precos = [p.price for p in validos]
+    if precos:
+        media_preco = mean(precos)
+        mediana_preco = median(precos)
+    else:
+        media_preco = 0
+        mediana_preco = 0
+
+    # Contagem de produtos por categoria
+    categorias = [p.category for p in validos]
+    contagem_por_categoria = dict(Counter(categorias))
 
     #JSON padronizado com o campo meta.integrity_report
     return jsonify({
     "data": {
         "total_registros": len(produtos),
-        "validos": integridade["acoes_tomadas"]["aceitos"],
-        "invalidos": integridade["acoes_tomadas"]["descartados"]
+        "validos": len(validos),
+        "invalidos": integridade["acoes_tomadas"]["descartados"],
+        "media_preco": media_preco,
+        "mediana_preco": mediana_preco,
+        "contagem_por_categoria": contagem_por_categoria
     },
     "meta": {
         "integrity_report": integridade
