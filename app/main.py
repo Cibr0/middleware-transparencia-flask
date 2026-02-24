@@ -36,7 +36,9 @@ def produtos_summary():
 
     for item in produtos:
         try:
-            Produto(**item)
+            # Guardando o produto validado no array validos
+            produto_validado = Produto(**item)
+            validos.append(produto_validado)
             integridade["acoes_tomadas"]["aceitos"] += 1
         except ValidationError as e:
             integridade["acoes_tomadas"]["descartados"] += 1
