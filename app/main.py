@@ -7,17 +7,50 @@ from models import Produto
 from pydantic import ValidationError
 import time
 
-app = Flask(__name__)
+import os
+import platform
+from datetime import datetime, timedelta
+import socket
 
+app = Flask(__name__)
 start_time = time.time()
+request_count = 0
+
+@app.before_request
+def before_request():
+    global request_count
+    request_count += 1
 
 @app.route("/status")
 def status():
-    uptime = time.time() - start_time
+    global request_count
+    current_time = time.time()
+    uptime = current_time - start_time
+    
+    # Formatar uptime
+    hours = int(uptime // 3600)
+    minutes = int((uptime % 3600) // 60)
+    seconds = int(uptime % 60)
+    
     return jsonify({
-        "status": "ok",
-        "uptime": uptime,
-        "version": "1.0"
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "environment": os.getenv('FLASK_ENV', 'development'),
+        
+        "api": {
+            "name": "Client_Middleware",
+            "version": "1.0.0",
+            "uptime": f"{hours}h {minutes}m {seconds}s",
+            "uptime_seconds": uptime,
+            "started_at": datetime.fromtimestamp(start_time).isoformat(),
+            "total_requests": request_count
+        },
+        
+        "system": {
+            "hostname": socket.gethostname(),
+            "python_version": platform.python_version(),
+            "platform": platform.platform()
+        },
     })
 
 @app.route("/data/summary")
