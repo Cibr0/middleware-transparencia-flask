@@ -1,7 +1,7 @@
 from collections import Counter
 from statistics import mean, median
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from fetcher import fetch_produtos
 from models import Produto
 from pydantic import ValidationError
@@ -128,13 +128,13 @@ def produtos_summary():
     }
 })
 
-app.route("/data/products", methods=["GET"])
+@app.route("/data/products", methods=["GET"])
 def list_products():
     categoria_param = request.args.get("category")
     simular_erro = request.args.get("simular_erro", "false").lower() == "true"
 
     try:
-        produtos_raw =fetch_produtos(simular_erro=simular_erro)
+        produtos_raw = fetch_produtos(simular_erro=simular_erro)
     except Exception as e:
         return jsonify({
             "status": "error",
@@ -151,12 +151,11 @@ def list_products():
 
     for item in produtos_raw:
         try:
-            prod = Produtos(**item)
+            prod = Produto(**item)
             validos.append(prod)
             integridade["acoes_tomadas"]["aceitos"] += 1
-
         except ValidationError as e:
-            integridade["acoes_tomadas"]["descartados"] +=
+            integridade["acoes_tomadas"]["descartados"] += 1
             for erro in e.errors():
                 campo = erro["loc"][0] if erro["loc"] else "desconhecido"
                 tipo_erro = erro["type"]
@@ -167,24 +166,26 @@ def list_products():
                         "quantidade": 0,
                         "exemplos": []
                     }
+                
                 integridade["erros_por_campo"][campo]["quantidade"] += 1
                 if len(integridade["erros_por_campo"][campo]["exemplos"]) < 3:
                     integridade["erros_por_campo"][campo]["exemplos"].append(str(item.get(campo, "ausente")))
+
     integridade["tipos_erros_detectados"] = list(integridade["tipos_erros_detectados"])
 
     produtos_filtrados = validos
 
     if categoria_param:
         categorias_desejadas = [
-            cat.strip(). lower()
+            cat.strip().lower()
             for cat in categoria_param.split(",")
             if cat.strip()
         ]
 
-        if catgorias_desejadas:
+        if categorias_desejadas:
             produtos_filtrados = [
                 p for p in validos
-                if p.categry.lower() in categorias_desejadas
+                if p.category.lower() in categorias_desejadas  
             ]
 
     produtos_json = [p.model_dump() for p in produtos_filtrados]
@@ -194,12 +195,18 @@ def list_products():
         "data": {
             "produtos": produtos_json,
             "total_encontrados": len(produtos_json),
-            "total_validos_antes_filtros": len(validos),
+            "total_validos_antes_filtro": len(validos),        
             "total_registros_originais": len(produtos_raw),
-            "filtro_categoria_aplicado":  categoria_param or "nenhum (todos)",
-            "categorias_encontradas": list(sorted)
+            "filtro_categoria_aplicado": categoria_param or "nenhum (todos)",
+            "categorias_encontradas": list(sorted(set(p.category for p in produtos_filtrados)))
+        },
+        "meta": {
+            "integrity_report": integridade,
+            "fonte": "https://dummyjson.com/products",
+            "timestamp": datetime.utcnow().isoformat() + "Z"
         }
     })
-            
+        
+
 if __name__ == "__main__":
     app.run(debug=True)
