@@ -1,8 +1,8 @@
 from collections import Counter
 from statistics import mean, median
+import fetcher
 
 from flask import Flask, jsonify, request, url_for
-from fetcher import fetch_produtos
 from models import Produto
 from pydantic import ValidationError
 import time
@@ -11,7 +11,9 @@ import os
 import platform
 from datetime import datetime, timedelta
 import socket
-from typing import List 
+from typing import List
+from cache import cache
+from fetcher import CIRCUIT_OPEN, failure_count 
 
 app = Flask(__name__)
 start_time = time.time()
@@ -126,17 +128,29 @@ def status():
             "python_version": platform.python_version(),
             "platform": platform.platform()
         },
+        "dependencies": {
+            "cache": cache.stats(),
+            "circuit_breaker": {
+                "open": fetcher.CIRCUIT_OPEN,
+                "failure_count": fetcher.failure_count
+            },
+            "last_fetch": {
+                "timestamp": fetcher.LAST_FETCH_TIMESTAMP,
+                "status_code": fetcher.LAST_FETCH_STATUS,
+                "fallback_used": fetcher.LAST_FETCH_FALLBACK
+            }
+        }
     })
 
 @app.route("/data/summary")
 def produtos_summary():
-    produtos, status_code, is_fallback = fetch_produtos(simular_erro=False)
+    produtos, status_code, is_fallback = fetcher.fetch_produtos(simular_erro=False)
     return processar_produtos(produtos, status_code, is_fallback)
 
 
 @app.route("/data/summary-test")
 def produtos_summary_test():
-    produtos, status_code, is_fallback = fetch_produtos(simular_erro=True)
+    produtos, status_code, is_fallback = fetcher.fetch_produtos(simular_erro=True)
     return processar_produtos(produtos, status_code, is_fallback)
 
 @app.route("/data/products", methods=["GET"])
@@ -175,7 +189,7 @@ def list_products():
         }), 400
 
     try:
-        produtos_raw, status_code, is_fallback = fetch_produtos(simular_erro=simular_erro)
+        produtos_raw, status_code, is_fallback = fetcher.fetch_produtos(simular_erro=simular_erro)
     except Exception as e:
         return jsonify({
             "status": "error",
@@ -186,7 +200,11 @@ def list_products():
         return jsonify({
             "status": "error",
             "message": "Serviço indisponível",
-            "fallback_ativado": is_fallback
+            "meta": {
+                "resilience": {
+                    "fallback_ativado": is_fallback
+                }
+            }
         }), status_code
 
     validos: List[Produto] = []

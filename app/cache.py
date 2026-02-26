@@ -39,7 +39,7 @@ class SimpleTTLCache:
             return {
                 "keys": len(self.store),
                 "hits": self.hits,
-                "misses": self.misses
+                "misses": self.misses,
             }
 
 cache = SimpleTTLCache()
