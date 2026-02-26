@@ -175,12 +175,19 @@ def list_products():
         }), 400
 
     try:
-        produtos_raw = fetch_produtos(simular_erro=simular_erro)
+        produtos_raw, status_code, is_fallback = fetch_produtos(simular_erro=simular_erro)
     except Exception as e:
         return jsonify({
             "status": "error",
             "message": f"Não foi possível obter os dados da fonte: {str(e)}"
         }), 503
+
+    if produtos_raw is None:
+        return jsonify({
+            "status": "error",
+            "message": "Serviço indisponível",
+            "fallback_ativado": is_fallback
+        }), status_code
 
     validos: List[Produto] = []
     integridade = {
