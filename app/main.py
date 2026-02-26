@@ -1,7 +1,7 @@
 from collections import Counter
 from statistics import mean, median
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, url_for
 from fetcher import fetch_produtos
 from models import Produto
 from pydantic import ValidationError
@@ -130,8 +130,38 @@ def produtos_summary():
 
 @app.route("/data/products", methods=["GET"])
 def list_products():
+
+    errors = []
+
+    page_str = request.args.get("page", "1")
+    try:
+        page = int(page_str)
+        if page < 1:
+            errors.append("page deve ser ≥ 1")
+    except ValueError:
+        errors.append(f"page inválido: '{page_str}' (deve ser um número inteiro)")
+
+    limit_str = request.args.get("limit", "20")
+    try:
+        limit = int(limit_str)
+        if limit < 1:
+            errors.append("limit deve ser ≥ 1")
+        if limit > 100:
+            errors.append("limit máximo permitido é 100")
+    except ValueError:
+        errors.append(f"limit inválido: '{limit_str}' (deve ser um número inteiro)")
+
     categoria_param = request.args.get("category")
-    simular_erro = request.args.get("simular_erro", "false").lower() == "true"
+
+    simular_erro_str = request.args.get("simular_erro", "false").lower()
+    simular_erro = simular_erro_str in ("true", "1", "yes", "sim")
+
+    if errors:
+        return jsonify({
+            "status": "error",
+            "message": "Parâmetros inválidos",
+            "details": errors
+        }), 400
 
     try:
         produtos_raw = fetch_produtos(simular_erro=simular_erro)
@@ -140,7 +170,7 @@ def list_products():
             "status": "error",
             "message": f"Não foi possível obter os dados da fonte: {str(e)}"
         }), 503
-    
+
     validos: List[Produto] = []
     integridade = {
         "erros_por_campo": {},
@@ -166,7 +196,6 @@ def list_products():
                         "quantidade": 0,
                         "exemplos": []
                     }
-                
                 integridade["erros_por_campo"][campo]["quantidade"] += 1
                 if len(integridade["erros_por_campo"][campo]["exemplos"]) < 3:
                     integridade["erros_por_campo"][campo]["exemplos"].append(str(item.get(campo, "ausente")))
@@ -181,21 +210,53 @@ def list_products():
             for cat in categoria_param.split(",")
             if cat.strip()
         ]
-
         if categorias_desejadas:
             produtos_filtrados = [
                 p for p in validos
-                if p.category.lower() in categorias_desejadas  
+                if p.category.lower() in categorias_desejadas
             ]
 
-    produtos_json = [p.model_dump() for p in produtos_filtrados]
+    total_itens_filtrados = len(produtos_filtrados)
+    total_paginas = (total_itens_filtrados + limit - 1) // limit if limit > 0 else 1
+
+    if page > total_paginas and total_paginas > 0:
+        page = total_paginas
+
+    start = (page - 1) * limit
+    end = start + limit
+    produtos_paginados = produtos_filtrados[start:end]
+
+    produtos_json = [p.model_dump() for p in produtos_paginados]
+
+    base_url = url_for("list_products", _external=True)
+    links = {
+        "self": f"{base_url}?page={page}&limit={limit}"
+    }
+    if categoria_param:
+        links["self"] += f"&category={categoria_param}"
+
+    if page > 1:
+        links["prev"] = f"{base_url}?page={page-1}&limit={limit}"
+        if categoria_param:
+            links["prev"] += f"&category={categoria_param}"
+
+    if page < total_paginas:
+        links["next"] = f"{base_url}?page={page+1}&limit={limit}"
+        if categoria_param:
+            links["next"] += f"&category={categoria_param}"
 
     return jsonify({
         "status": "success",
         "data": {
             "produtos": produtos_json,
-            "total_encontrados": len(produtos_json),
-            "total_validos_antes_filtro": len(validos),        
+            "paginacao": {
+                "pagina_atual": page,
+                "itens_por_pagina": limit,
+                "total_itens": total_itens_filtrados,
+                "total_paginas": total_paginas,
+                "links": links
+            },
+            "total_validos_antes_filtro": len(validos),
             "total_registros_originais": len(produtos_raw),
             "filtro_categoria_aplicado": categoria_param or "nenhum (todos)",
             "categorias_encontradas": list(sorted(set(p.category for p in produtos_filtrados)))
