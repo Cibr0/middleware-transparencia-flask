@@ -54,7 +54,7 @@ def fetch_produtos(simular_erro=False):
             start = time.time()
 
             response = requests.get(
-                "https://dummyjson.com/products",
+                "https://dummyjson.com/products/",
                 timeout=TIMEOUT
             )
             response.raise_for_status()
@@ -73,6 +73,13 @@ def fetch_produtos(simular_erro=False):
             LAST_FETCH_TIMESTAMP = datetime.utcnow().isoformat()
             LAST_FETCH_STATUS = response.status_code
             LAST_FETCH_FALLBACK = False
+
+            if simular_erro:
+                produtos[10]["price"] = -100
+                produtos[1].pop("title", None)
+                produtos[2]["price"] = "caro"
+                produtos[4]["meta"]["createdAt"] = "data_errada"
+                produtos[1].pop("description", None)
 
             return produtos, 200, False
 
