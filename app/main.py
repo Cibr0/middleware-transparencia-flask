@@ -1,8 +1,8 @@
 from collections import Counter
 from statistics import mean, median
+import fetcher
 
 from flask import Flask, jsonify, request, url_for
-from fetcher import fetch_produtos
 from models import Produto
 from pydantic import ValidationError
 import time
@@ -11,11 +11,87 @@ import os
 import platform
 from datetime import datetime, timedelta
 import socket
-from typing import List 
+from typing import List
+from cache import cache
+from fetcher import CIRCUIT_OPEN, failure_count 
 
 app = Flask(__name__)
 start_time = time.time()
 request_count = 0
+
+def processar_produtos(produtos, status_code, is_fallback):
+    if produtos is None:
+        return jsonify({
+            "error": "Serviço indisponível",
+            "meta": {
+                "resilience": {
+                    "fallback_ativado": is_fallback
+                }
+            }
+        }), status_code
+
+    integridade = {
+        "erros_por_campo": {},
+        "lista_erros_detectados": set(),
+        "source_url": "https://dummyjson.com/products",
+        "acoes_tomadas": {
+            "aceitos": 0,
+            "descartados": 0
+        }
+    }
+
+    validos = []
+
+    for item in produtos:
+        try:
+            produto_validado = Produto(**item)
+            validos.append(produto_validado)
+            integridade["acoes_tomadas"]["aceitos"] += 1
+        except ValidationError as e:
+            integridade["acoes_tomadas"]["descartados"] += 1
+
+            for erro in e.errors():
+                campo = erro["loc"][0]
+                tipo = erro["type"]
+                valor = item.get(campo, "ausente")
+
+                if campo not in integridade["erros_por_campo"]:
+                    integridade["erros_por_campo"][campo] = {
+                        "quantidade": 0,
+                        "exemplos": []
+                    }
+
+                integridade["erros_por_campo"][campo]["quantidade"] += 1
+                integridade["erros_por_campo"][campo]["exemplos"].append(str(valor))
+                integridade["lista_erros_detectados"].add(tipo)
+
+    integridade["lista_erros_detectados"] = list(integridade["lista_erros_detectados"])
+
+    precos = [p.price for p in validos]
+    media_preco = mean(precos) if precos else 0
+    mediana_preco = median(precos) if precos else 0
+
+    categorias = [p.category for p in validos]
+    contagem_por_categoria = dict(Counter(categorias))
+
+    response = {
+        "data": {
+            "total_registros": len(produtos),
+            "validos": len(validos),
+            "invalidos": integridade["acoes_tomadas"]["descartados"],
+            "media_preco": media_preco,
+            "mediana_preco": mediana_preco,
+            "contagem_por_categoria": contagem_por_categoria
+        },
+        "meta": {
+            "integrity_report": integridade,
+            "resilience": {
+                "fallback_ativado": is_fallback
+            }
+        }
+    }
+
+    return jsonify(response), status_code
 
 @app.before_request
 def before_request():
@@ -52,81 +128,30 @@ def status():
             "python_version": platform.python_version(),
             "platform": platform.platform()
         },
+        "dependencies": {
+            "cache": cache.stats(),
+            "circuit_breaker": {
+                "open": fetcher.CIRCUIT_OPEN,
+                "failure_count": fetcher.failure_count
+            },
+            "last_fetch": {
+                "timestamp": fetcher.LAST_FETCH_TIMESTAMP,
+                "status_code": fetcher.LAST_FETCH_STATUS,
+                "fallback_used": fetcher.LAST_FETCH_FALLBACK
+            }
+        }
     })
 
 @app.route("/data/summary")
 def produtos_summary():
-    produtos = fetch_produtos(simular_erro=True)
+    produtos, status_code, is_fallback = fetcher.fetch_produtos(simular_erro=False)
+    return processar_produtos(produtos, status_code, is_fallback)
 
-    integridade = {
-        "erros_por_campo": {},
-        "lista_erros_detectados": set(),
-        "source_url": "https://dummyjson.com/products",
-        "acoes_tomadas": {
-            "aceitos": 0,
-            "descartados": 0
-        }
-    }
 
-    validos = []
-    invalidos = 0
-
-    for item in produtos:
-        try:
-            # Guardando o produto validado no array validos
-            produto_validado = Produto(**item)
-            validos.append(produto_validado)
-            integridade["acoes_tomadas"]["aceitos"] += 1
-        except ValidationError as e:
-            integridade["acoes_tomadas"]["descartados"] += 1
-
-            for erro in e.errors():
-                campo = erro["loc"][0]
-                tipo = erro["type"]
-                valor = item.get(campo, "ausente")
-
-                if campo not in integridade["erros_por_campo"]:
-                    integridade["erros_por_campo"][campo] = {
-                        "quantidade": 0,
-                        "exemplos": []
-                    }
-
-                integridade["erros_por_campo"][campo]["quantidade"] += 1
-                integridade["erros_por_campo"][campo]["exemplos"].append(str(valor))
-
-                integridade["lista_erros_detectados"].add(tipo)
-    
-    integridade["lista_erros_detectados"] = list(integridade["lista_erros_detectados"])
-
-    # Cálculo de média e mediana dos preços dos produtos válidos
-    #Media - Soma tudo e divide pela quantidade.
-    #Mediana - Ordena e pega o valor do meio.
-    precos = [p.price for p in validos]
-    if precos:
-        media_preco = mean(precos)
-        mediana_preco = median(precos)
-    else:
-        media_preco = 0
-        mediana_preco = 0
-
-    # Contagem de produtos por categoria
-    categorias = [p.category for p in validos]
-    contagem_por_categoria = dict(Counter(categorias))
-
-    #JSON padronizado com o campo meta.integrity_report
-    return jsonify({
-    "data": {
-        "total_registros": len(produtos),
-        "validos": len(validos),
-        "invalidos": integridade["acoes_tomadas"]["descartados"],
-        "media_preco": media_preco,
-        "mediana_preco": mediana_preco,
-        "contagem_por_categoria": contagem_por_categoria
-    },
-    "meta": {
-        "integrity_report": integridade
-    }
-})
+@app.route("/data/summary-test")
+def produtos_summary_test():
+    produtos, status_code, is_fallback = fetcher.fetch_produtos(simular_erro=True)
+    return processar_produtos(produtos, status_code, is_fallback)
 
 @app.route("/data/products", methods=["GET"])
 def list_products():
@@ -164,12 +189,23 @@ def list_products():
         }), 400
 
     try:
-        produtos_raw = fetch_produtos(simular_erro=simular_erro)
+        produtos_raw, status_code, is_fallback = fetcher.fetch_produtos(simular_erro=simular_erro)
     except Exception as e:
         return jsonify({
             "status": "error",
             "message": f"Não foi possível obter os dados da fonte: {str(e)}"
         }), 503
+
+    if produtos_raw is None:
+        return jsonify({
+            "status": "error",
+            "message": "Serviço indisponível",
+            "meta": {
+                "resilience": {
+                    "fallback_ativado": is_fallback
+                }
+            }
+        }), status_code
 
     validos: List[Produto] = []
     integridade = {
